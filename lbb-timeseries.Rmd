@@ -1,0 +1,170 @@
+---
+title: "LBB-Time Series"
+author: "annomitty"
+date: "9/19/2021"
+output: html_document
+---
+
+CALL LIBRARY
+
+```{r}
+library(dplyr)
+library(forecast)
+library(plotly)
+library(TTR)
+library(MLmetrics)
+library(tseries)
+library(data.table)
+library(padr)
+library(ContourFunctions)
+```
+
+READ DATA
+
+```{r}
+crime <- read.csv("Crimes_-_2001_to_Present.csv")
+dim(crime)
+```
+```{r}
+unique(crime$Primary.Type)
+```
+UNTUK LBB INI AKAN DIGUNAKAN YANG PRIMARY TYPE = HOMICIDE.
+
+```{r}
+crime_h <- subset(crime, Primary.Type=="HOMICIDE")
+dim(crime_h)
+```
+```{r}
+head(crime_h)
+```
+
+```{r}
+crime_h1 <- crime_h[,c(3,6)]
+colSums(is.na(crime_h1))
+```
+```{r}
+glimpse(crime_h1)
+```
+```{r}
+crime_h1$Date <- as.Date(crime_h1$Date, format ="%m/%d/%Y ")
+head(crime_h1)
+```
+
+
+```{r}
+crime_h2 <- setDT(crime_h1)[, .N, Date]
+crime_h2 <- crime_h2 %>% 
+  arrange(Date) %>% 
+  pad()
+```
+```{r}
+crime_h2$N <- nafill(crime_h2$N,
+                     type = "const",
+                     fill = 0
+                     )
+head(crime_h2)
+```
+
+
+
+MENGUBAH DATASET KE DALAM TIMESERIES
+
+
+```{r}
+crime_ts <- ts(crime_h2$N, start = c(2001,1), frequency = 365)
+autoplot(crime_ts, series = "Actual")
+```
+
+DECOMPOSE DATA TIME SERIES.
+
+```{r}
+crime_dc <- decompose(crime_ts)
+autoplot(crime_dc)
+```
+
+DARI DATA DIATAS DAPAT DISIMPULKAN SECARA VISUAL DATA TIDAK MEMILIKI TREND, NAMUN DI TAHUN-TAHUN BELAKANGAN INI TINGKAT HOMICIDE MENINGKAT.
+DAN MEMILIKI SEASONAL.
+
+CROSS VALIDATION
+
+```{r}
+crime_train <- head(crime_ts, -2*365)
+crime_test <- tail(crime_ts, 2*365)
+```
+
+```{r}
+crime_train %>% 
+  adf.test()
+```
+
+MEMBUAT MODEL TIME SERIES DENGAN AUTO-ARIMA
+- MENGGUNAKAN AUTO SARIMA KARENA DATA YANG TIDAK MEMILIKI TREND, TAPI MEMILIKI SEASONAL 
+
+```{r}
+crime_auto <- auto.arima(crime_train, seasonal = T)
+```
+
+```{r}
+crime_auto
+```
+```{r}
+crime_train %>%
+  autoplot(series = "Actual") +
+  autolayer(crime_auto$fitted, series = "ARIMA(3,1,2)")
+```
+
+```{r}
+forecast_crime_auto <- forecast(crime_auto, h=365)
+forecast_crime_auto %>% 
+  autoplot() +
+  autolayer(crime_test)
+```
+
+
+```{r}
+summary(crime_auto)
+```
+Tidak bisa menggunakan MAPE sebagai dasar penentuan apakah model perform dengan baik / tidak karena ada time series data yang harus di padding dengan nilai 0, secara real pada hari tersebut memang tidak ada crime- homicide.
+
+VARIABLE ARIMA DARI AUTO ARIMA ADALAH
+p 3
+d 1
+q 2
+
+
+```{r}
+crime_sarima1 <- Arima(crime_train,
+                       order = c(1,1,1),
+                       seasonal = c(0,1,0))
+summary(crime_sarima1)
+```
+```{r}
+Box.test(crime_sarima1$residuals, type = "Ljung")
+```
+```{r}
+crime_sarima2 <- Arima(crime_train,
+                       order = c(3,1,2),
+                       seasonal = c(0,1,0))
+summary(crime_sarima2)
+Box.test(crime_sarima1$residuals, type = "Ljung")
+```
+
+
+
+
+EVALUATION
+
+```{r}
+summary(crime_auto)
+```
+
+```{r}
+hist(crime_auto$residuals)
+```
+
+```{r}
+Box.test(crime_auto$residuals, type = "Ljung")
+```
+
+
+
